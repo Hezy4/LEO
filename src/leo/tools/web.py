@@ -5,10 +5,16 @@ from typing import Any, Dict, List
 
 import httpx
 
+_DDGS_QUERY_PARAM = ""
 try:  # pragma: no cover - optional dependency fallback
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS  # type: ignore
+    _DDGS_QUERY_PARAM = "query"
 except ImportError:  # pragma: no cover
-    DDGS = None
+    try:
+        from duckduckgo_search import DDGS  # type: ignore
+        _DDGS_QUERY_PARAM = "keywords"
+    except ImportError:
+        DDGS = None  # type: ignore
 
 from .base import BaseTool, ToolResult
 
@@ -33,24 +39,11 @@ class WebSearchTool(BaseTool):
 
         results: List[Dict[str, Any]] | None = None
 
-        if DDGS is not None:
-            try:
-                with DDGS() as ddgs:
-                    entries = list(ddgs.text(query, max_results=max_results))
-                    formatted = self._format_results(entries)
-                    results = formatted or None
-            except Exception:  # pragma: no cover - network/HTML changes
-                results = None
+        if DDGS is not None and _DDGS_QUERY_PARAM:
+            results = self._ddgs_search("text", query, max_results)
 
-        if not results and DDGS is not None:
-            if DDGS is not None:
-                try:
-                    with DDGS() as ddgs:
-                        entries = list(ddgs.news(query, max_results=max_results))
-                        formatted = self._format_results(entries)
-                        results = formatted or None
-                except Exception:
-                    results = None
+        if not results and DDGS is not None and _DDGS_QUERY_PARAM:
+            results = self._ddgs_search("news", query, max_results)
 
         if not results:
             client = self.context.http_client
@@ -86,6 +79,21 @@ class WebSearchTool(BaseTool):
                 }
             )
         return formatted
+
+    def _ddgs_search(self, method: str, query: str, max_results: int) -> List[Dict[str, Any]] | None:
+        if DDGS is None or not _DDGS_QUERY_PARAM:
+            return None
+        try:
+            with DDGS() as ddgs:
+                search_fn = getattr(ddgs, method, None)
+                if search_fn is None:
+                    return None
+                kwargs = {"max_results": max_results, _DDGS_QUERY_PARAM: query}
+                entries = list(search_fn(**kwargs))
+                formatted = self._format_results(entries)
+                return formatted or None
+        except Exception:  # pragma: no cover - network or API changes
+            return None
 
 
 __all__ = ["WebSearchTool"]
