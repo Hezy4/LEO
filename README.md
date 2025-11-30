@@ -495,6 +495,7 @@ To begin implementing the orchestrator, a foundational Ollama client has been ad
 - `scripts/run_server.py` – Launches the FastAPI orchestrator via Uvicorn.
 - `scripts/chat_cli.py` – Simple terminal interface that talks to the `/chat` endpoint for manual testing.
 - `scripts/voice_agent.py` – Wake-word driven STT → LEO → TTS loop built with openwakeword, faster-whisper, and Piper.
+- `scripts/train_wakeword.py` – Downloads all openWakeWord pretrained models into `models/openwakeword/` for the voice agent.
 
 Install dependencies with `pip install -e .` (uses `pyproject.toml`), start Ollama as described in the spec, and run `python examples/ollama_ping.py` to perform a smoke test of the local LLM endpoint.
 
@@ -577,26 +578,36 @@ Configure the following environment variables before running the server if you�
 
 The tool registry exposes `homeassistant.set_lights` and `homeassistant.run_scene`. When tokens are missing, the adapters still succeed but return `mode: dry_run` to show what would have been sent.
 
-### Voice Agent (Wake Word + STT + TTS)
+### Voice Agent (Porcupine + Whisper + Piper)
 
-For a fully local voice experience:
+For a fully local voice experience with an on-device wake word:
 
-1. **Download models**
-- Wake word (`.tflite`): grab or train a `leo` wake-word model (e.g., `leo_v0.1.tflite`) from [openwakeword’s releases](https://github.com/dscripka/openWakeWord).
-   - Whisper (STT): download a faster-whisper model directory (e.g., `small`, `base`, or a local path to a converted `.bin`).
+1. **Download models & keys**
+   - Wake word: log into the [Picovoice Console](https://console.picovoice.ai/) and download a Porcupine `.ppn` keyword for your platform (e.g., `macOS ARM64`). Save it under `data/wakeword/` (the agent defaults to `data/wakeword/hey_leo.ppn`, so drop your file there unless you pass `--porcupine-keyword`). You’ll also need a Picovoice access key (store it in the `PICOVOICE_ACCESS_KEY` env var or inside a `.env` file in the repo root).
+   - Whisper (STT): grab a faster-whisper model directory (e.g., `small`, `base`, or a local path to a converted `.bin`).
    - Piper (TTS): download a British voice pair (`model.onnx` + `model.onnx.json`) from [rhasspy/piper voices](https://github.com/rhasspy/piper/tree/master/VOICES). `en_GB-ryan-high` gives a composed Jarvis-like tone.
 
-2. Start the orchestrator (`python scripts/run_server.py`).
-
-3. In another terminal, run:
+2. (Optional sanity check) run the Porcupine test harness to ensure the keyword fires:
 
 ```
-python scripts/voice_agent.py \
-  --wakeword-model /path/to/hey_jarvis_v0.1.tflite \
-  --wakeword-name leo \
+python scripts/test_porcupine.py \
+  --keyword-file data/wakeword/hey_leo_mac.ppn \
+  --access-key "$PICOVOICE_ACCESS_KEY" \
+  --show-audio-level --exit-on-detect
+```
+
+Use `--list-devices` if you need to discover the input device index or tweak `--sensitivity` for your environment.
+
+3. Start the orchestrator (`python scripts/run_server.py`).
+
+4. In another terminal, launch the voice agent with Porcupine enabled:
+
+```
+PICOVOICE_ACCESS_KEY=... python scripts/voice_agent.py \
+  --porcupine-keyword data/wakeword/hey_leo_mac.ppn \
   --whisper-model small \
   --piper-model /path/to/en_GB-ryan-high.onnx \
   --piper-config /path/to/en_GB-ryan-high.onnx.json
 ```
 
-Optional flags: `--user-id`, `--session-id`, `--language`, `--input-device`, and `--listen-duration` to tweak capture length. Speak the wake word, say your request, and Piper will answer using the Jarvis-style voice.
+Key options: `--porcupine-keyword` (defaults to `data/wakeword/hey_leo.ppn`), `--porcupine-access-key` (otherwise it falls back to `PICOVOICE_ACCESS_KEY` loaded from the environment or `.env`), `--porcupine-sensitivity`, `--manual-trigger` (skip wake word and press Enter manually), plus the existing `--user-id`, `--session-id`, `--language`, `--input-device`, `--listen-duration`, and `--whisper-model` (defaults to `base`). Both `scripts/test_porcupine.py` and `scripts/voice_agent.py` automatically load `.env` from the repo root if it exists. Say the wake word, speak your request, and Piper will respond via TTS.
