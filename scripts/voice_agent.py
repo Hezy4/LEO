@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--listen-duration",
         type=float,
-        default=30.0,
+        default=60.0,
         help="Max seconds to record per request before forcing a cutoff (set <=0 for unlimited)",
     )
     parser.add_argument("--whisper-model", default="base", help="Whisper model size or path for faster-whisper")
@@ -93,8 +93,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--silence-duration",
         type=float,
-        default=0.8,
-        help="Seconds of trailing silence required before ending an utterance (set <=0 to disable).",
+        default=1.75,
+        help="Seconds of trailing silence required before ending an utterance (raise this if pauses cut you off; set <=0 to disable).",
     )
     parser.add_argument(
         "--followup-window",
