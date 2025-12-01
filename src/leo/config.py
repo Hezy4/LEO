@@ -50,5 +50,21 @@ class HomeAssistantConfig:
             token=os.getenv("HA_TOKEN", cls.token or ""),
         )
 
+@dataclass(frozen=True)
+class EmbeddingConfig:
+    """Settings for embedding generation (via Ollama)."""
 
-__all__ = ["OllamaConfig", "DatabaseConfig", "HomeAssistantConfig"]
+    host: str = "http://localhost:11434"
+    model: str = "nomic-embed-text"
+    timeout: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> "EmbeddingConfig":
+        return cls(
+            host=os.getenv("EMBED_HOST", cls.host),
+            model=os.getenv("EMBED_MODEL", cls.model),
+            timeout=float(os.getenv("EMBED_TIMEOUT", cls.timeout)),
+        )
+
+
+__all__ = ["OllamaConfig", "DatabaseConfig", "HomeAssistantConfig", "EmbeddingConfig"]

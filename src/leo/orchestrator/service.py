@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from leo.clients import OllamaClient, OllamaError
+from leo.clients import OllamaClient, OllamaError, EmbeddingClient
 from leo.memory import (
     PreferenceStore,
     TaskStore,
@@ -17,6 +17,7 @@ from leo.memory import (
     SessionStore,
     PersonaStore,
     MoodStore,
+    LongTermMemoryStore,
 )
 from leo.tools import ToolRegistry
 
@@ -63,14 +64,16 @@ class StatusResponse(BaseModel):
 
 app = FastAPI(title="LEO Orchestrator", version="0.1.0")
 _ollama = OllamaClient()
+_embedder = EmbeddingClient()
 _preferences = PreferenceStore()
 _persona_store = PersonaStore()
 _moods = MoodStore(persona_store=_persona_store)
+_ltm = LongTermMemoryStore(embed_client=_embedder)
 _tools = ToolRegistry.default()
 _tasks = TaskStore()
 _reminders = ReminderStore()
 _episodes = EpisodicMemoryStore()
-_sessions = SessionStore()
+_sessions = SessionStore(max_history=12, max_age_minutes=20)
 
 
 def _strip_json_fences(content: str) -> str:
@@ -187,6 +190,28 @@ def _gather_context(user_id: str) -> str:
     return build_memory_context(tasks, reminders, episodes)
 
 
+def _retrieve_ltm_context(user_id: str, query: str) -> tuple[str, list[Any]]:
+    try:
+        query_embedding = _embedder.embed(query)
+    except Exception:
+        return "", []
+
+    user_mems = _ltm.search(user_id=user_id, owner_type="user", query_embedding=query_embedding, limit=6)
+    assistant_mems = _ltm.search(user_id=user_id, owner_type="assistant", query_embedding=query_embedding, limit=4)
+    lines: list[str] = []
+    collected: list[Any] = []
+    for mem in user_mems:
+        collected.append(mem)
+        tags = ",".join(mem.tags) if hasattr(mem, "tags") else ""
+        lines.append(f"[user] {mem.content} (tags: {tags}, importance: {getattr(mem, 'importance', 0):.2f})")
+    for mem in assistant_mems:
+        collected.append(mem)
+        tags = ",".join(mem.tags) if hasattr(mem, "tags") else ""
+        lines.append(f"[assistant] {mem.content} (tags: {tags}, importance: {getattr(mem, 'importance', 0):.2f})")
+    text = "\n".join(lines)
+    return text, collected
+
+
 def _is_structured_json(text: str) -> bool:
     candidate = text.strip()
     if not candidate.startswith(("{", "[")):
@@ -228,6 +253,76 @@ def _apply_personality_filter(
         return neutral_reply
 
 
+def _classify_owner_type(text: str) -> str:
+    lowered = text.lower()
+    if any(token in lowered for token in ["you", "leo", "assistant"]):
+        return "assistant"
+    return "user"
+
+
+def _infer_tags(text: str) -> list[str]:
+    lowered = text.lower()
+    tags: list[str] = []
+    if any(token in lowered for token in ["prefer", "like", "love", "favorite"]):
+        tags.append("preference")
+    if any(token in lowered for token in ["project", "build", "plan", "working on"]):
+        tags.append("project")
+    if any(token in lowered for token in ["relationship", "together", "with you", "appreciate"]):
+        tags.append("relationship")
+    if any(token in lowered for token in ["assistant", "leo", "you"]):
+        tags.append("self")
+    if not tags:
+        tags.append("history")
+    return tags
+
+
+def _extract_memory_facts(user_message: str, assistant_reply: str) -> list[str]:
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "You extract durable facts for long-term memory. Return a JSON array of concise bullet strings, "
+                "or the string NONE if nothing is worth remembering. Only include persistent preferences, facts, "
+                "projects, relationship notes, or commitments. Do not include transient chit-chat."
+            ),
+        },
+        {"role": "user", "content": f"User said: {user_message}\nAssistant replied: {assistant_reply}\nExtract memory bullets or NONE."},
+    ]
+    try:
+        result = _ollama.chat(prompt)
+        content = result["message"]["content"].strip()
+        if content.lower().startswith("none"):
+            return []
+        if content.startswith("```"):
+            content = _strip_json_fences(content)
+        facts = json.loads(content)
+        if isinstance(facts, list):
+            return [str(item).strip() for item in facts if str(item).strip()]
+    except Exception:
+        return []
+    return []
+
+
+def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_reply: str) -> None:
+    facts = _extract_memory_facts(user_message, assistant_reply)
+    if not facts:
+        return
+    for fact in facts:
+        owner_type = _classify_owner_type(fact)
+        tags = _infer_tags(fact)
+        try:
+            _ltm.add_memory(
+                user_id=user_id,
+                owner_type=owner_type,
+                content=fact,
+                tags=tags,
+                importance=0.6,
+                plasticity=0.3,
+            )
+        except Exception:
+            continue
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest) -> ChatResponse:
     session_id = request.session_id or request.user_id
@@ -235,6 +330,11 @@ def chat_endpoint(request: ChatRequest) -> ChatResponse:
     persona_settings = _persona_store.get_settings(request.user_id)
     all_traits = _persona_store.list_traits(request.user_id) if persona_settings else []
     active_traits = select_top_traits(all_traits)
+
+    # Decay and prune LTM before retrieval
+    _ltm.decay_importance(user_id=request.user_id, owner_type="user")
+    _ltm.decay_importance(user_id=request.user_id, owner_type="assistant")
+    _ltm.prune_caps(user_id=request.user_id)
 
     effect_name = classify_interaction_effect(request.message) if persona_settings else None
     mood_state = (
@@ -244,10 +344,13 @@ def chat_endpoint(request: ChatRequest) -> ChatResponse:
     ) if persona_settings else None
 
     memory_context = _gather_context(request.user_id)
+    ltm_text, retrieved_memories = _retrieve_ltm_context(request.user_id, request.message)
+    if ltm_text:
+        memory_context = f"{memory_context}\n\nLong-term memory:\n{ltm_text}" if memory_context else f"Long-term memory:\n{ltm_text}"
     system_prompt = build_system_prompt(persona, _tools.list_tools(), memory_context)
 
     try:
-        history = _sessions.get_history(session_id) if session_id else []
+        history = _sessions.get_history(session_id, max_age_minutes=20) if session_id else []
         messages = [{"role": "system", "content": system_prompt}, *history]
         step = _chat_once_with_history(messages, request.message)
     except OllamaError as exc:  # pragma: no cover - network/runtime guard
@@ -278,6 +381,19 @@ def chat_endpoint(request: ChatRequest) -> ChatResponse:
 
     if reply and persona_settings and mood_state:
         reply = _apply_personality_filter(request.message, reply, active_traits, mood_state)
+
+    # Memory extraction: capture durable facts/preferences from the turn
+    try:
+        _maybe_extract_and_store_memory(request.user_id, request.message, reply)
+    except Exception:
+        pass
+
+    # Merge redundant memories occasionally
+    try:
+        _ltm.merge_redundant(user_id=request.user_id, owner_type="user")
+        _ltm.merge_redundant(user_id=request.user_id, owner_type="assistant")
+    except Exception:
+        pass
 
     if session_id:
         _sessions.append(session_id, request.user_id, "user", request.message)

@@ -16,9 +16,10 @@ class ConversationMessage:
 
 
 class SessionStore:
-    def __init__(self, db: Database | None = None, *, max_history: int = 20) -> None:
+    def __init__(self, db: Database | None = None, *, max_history: int = 20, max_age_minutes: int | None = None) -> None:
         self.db = db or Database()
         self.max_history = max_history
+        self.max_age_minutes = max_age_minutes
 
     def append(self, session_id: str, user_id: str, role: str, content: str) -> None:
         if not session_id:
@@ -48,15 +49,27 @@ class SessionStore:
             )
             conn.commit()
 
-    def get_history(self, session_id: str) -> List[Dict[str, str]]:
-        rows = self.db.query(
-            """
-            SELECT role, content FROM conversation_messages
-            WHERE session_id = ?
-            ORDER BY created_at ASC, id ASC
-            """,
-            (session_id,),
-        )
+    def get_history(self, session_id: str, *, max_age_minutes: int | None = None) -> List[Dict[str, str]]:
+        age_limit = max_age_minutes if max_age_minutes is not None else self.max_age_minutes
+        if age_limit:
+            rows = self.db.query(
+                """
+                SELECT role, content FROM conversation_messages
+                WHERE session_id = ?
+                  AND created_at >= datetime('now', ?)
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id, f"-{int(age_limit)} minutes"),
+            )
+        else:
+            rows = self.db.query(
+                """
+                SELECT role, content FROM conversation_messages
+                WHERE session_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (session_id,),
+            )
         return [
             {"role": row["role"], "content": row["content"]}
             for row in rows
