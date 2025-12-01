@@ -8,6 +8,7 @@ from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantSetLightsTool, HomeAssistantRunSceneTool
 from .gmail import GmailGetMessageTool, GmailListMessagesTool
+from .weather_gov import WeatherGovForecastTool
 
 __all__ = [
     "BaseTool",
@@ -24,4 +25,5 @@ __all__ = [
     "GmailGetMessageTool",
     "HomeAssistantSetLightsTool",
     "HomeAssistantRunSceneTool",
+    "WeatherGovForecastTool",
 ]

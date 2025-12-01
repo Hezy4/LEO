@@ -578,6 +578,15 @@ Configure the following environment variables before running the server if you�
 
 The tool registry exposes `homeassistant.set_lights` and `homeassistant.run_scene`. When tokens are missing, the adapters still succeed but return `mode: dry_run` to show what would have been sent.
 
+### Weather.gov integration
+
+The `weather.gov.forecast` tool fetches National Weather Service data for a given latitude/longitude.
+
+- `WEATHER_GOV_USER_AGENT` – required contact-style User-Agent (e.g., `LEO/0.1 (your@email)`); weather.gov rejects requests without one
+- `WEATHER_GOV_TIMEOUT` – optional request timeout in seconds (default 15)
+
+Tool arguments: `latitude`, `longitude` (required), `hourly` (bool to include hourly periods), and `hours` (1–48 limit for hourly data).
+
 ### Voice Agent (Porcupine + Whisper + Piper)
 
 For a fully local voice experience with an on-device wake word:
