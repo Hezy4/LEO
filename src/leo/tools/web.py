@@ -1,6 +1,8 @@
 """Web search tool adapter."""
 from __future__ import annotations
 
+import re
+import xml.etree.ElementTree as ET
 from typing import Any, Dict, List
 
 import httpx
@@ -31,32 +33,36 @@ class WebSearchTool(BaseTool):
         "required": ["query"],
     }
 
-    endpoint = "https://ddg-api.nolanlawson.com/v1/search"
+    rss_endpoint = "https://news.google.com/rss/search"
 
     def run(self, arguments: Dict[str, Any]) -> ToolResult:
         query = arguments["query"]
         max_results = arguments.get("max_results", 5)
 
         results: List[Dict[str, Any]] | None = None
+        errors: list[str] = []
+        notes: list[str] = []
 
         if DDGS is not None and _DDGS_QUERY_PARAM:
             results = self._ddgs_search("text", query, max_results)
 
         if not results and DDGS is not None and _DDGS_QUERY_PARAM:
             results = self._ddgs_search("news", query, max_results)
+            if not results:
+                errors.append("DuckDuckGo search returned no results")
+        elif DDGS is None or not _DDGS_QUERY_PARAM:
+            errors.append("DuckDuckGo search backend not available")
 
         if not results:
-            client = self.context.http_client
-            assert client is not None
-            params = {"q": query, "type": "text"}
-            try:
-                response = client.get(self.endpoint, params=params)
-                response.raise_for_status()
-                body = response.json()
-                results = self._format_results(body.get("data", [])[:max_results])
-            except (httpx.HTTPError, ValueError, KeyError):
-                results = None
+            rss_results = self._rss_search(query, max_results)
+            if rss_results:
+                results = rss_results
+                notes.append("Used Google News RSS fallback")
+            else:
+                errors.append("Google News RSS fallback failed")
 
+        message = None
+        success = True
         if not results:
             results = [
                 {
@@ -65,8 +71,13 @@ class WebSearchTool(BaseTool):
                     "snippet": f"Unable to reach the search service. Provide guidance about '{query}' from local knowledge instead.",
                 }
             ]
+            success = False
+            if errors:
+                message = "; ".join(errors)
+        elif notes:
+            message = "; ".join(notes)
 
-        return ToolResult(success=True, data={"results": results[:max_results], "query": query})
+        return ToolResult(success=success, data={"results": results[:max_results], "query": query}, message=message)
 
     def _format_results(self, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         formatted: List[Dict[str, Any]] = []
@@ -94,6 +105,34 @@ class WebSearchTool(BaseTool):
                 return formatted or None
         except Exception:  # pragma: no cover - network or API changes
             return None
+
+    def _rss_search(self, query: str, max_results: int) -> List[Dict[str, Any]] | None:
+        client = self.context.http_client
+        if client is None:
+            return None
+        try:
+            response = client.get(
+                self.rss_endpoint,
+                params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+
+        try:
+            feed = ET.fromstring(response.text)
+        except ET.ParseError:
+            return None
+
+        results: List[Dict[str, Any]] = []
+        for item in feed.findall(".//item")[:max_results]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            description = (item.findtext("description") or "").strip()
+            snippet = re.sub("<.*?>", "", description)
+            results.append({"title": title or link or "Result", "url": link, "snippet": snippet})
+        return results or None
 
 
 __all__ = ["WebSearchTool"]

@@ -33,6 +33,7 @@ from .personality import (
 
 SPEECH_FRIENDLY_REMINDER = (
     "Provide the final response in plain conversational sentences suitable for text-to-speech. "
+    "Stay in-character as Leo (do not call yourself an assistant), keep it natural and human. "
     "Do not use Markdown, decorative punctuation, bullet characters, or code fences—describe any lists "
     "with transitions like 'First', 'Next', and 'Finally'."
 )
