@@ -78,3 +78,51 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_session_created
     ON conversation_messages(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS persona_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    personality_axes JSON NOT NULL,
+    evolution_settings JSON NOT NULL,
+    mood_axes JSON NOT NULL,
+    decay_settings JSON NOT NULL,
+    interaction_effects JSON NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS persona_traits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    coords JSON NOT NULL,
+    importance REAL NOT NULL,
+    plasticity REAL NOT NULL,
+    locked INTEGER NOT NULL DEFAULT 0,
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS persona_mood_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL DEFAULT '',
+    mood_values JSON NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS persona_trait_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trait_id INTEGER NOT NULL REFERENCES persona_traits(id) ON DELETE CASCADE,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_trait_usage_trait_id
+    ON persona_trait_usage(trait_id);

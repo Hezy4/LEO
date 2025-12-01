@@ -111,19 +111,14 @@ def build_system_prompt(
     tool_specs: List[Dict[str, object]],
     memory_context: str = "",
 ) -> str:
-    persona_text = format_persona(persona)
     tool_text = describe_tools(tool_specs)
-    style_rules = build_style_rules(persona)
     speech_rules = build_speech_rules()
 
     sections: List[str] = [
         "You are LEO, a local privacy-preserving executive assistant.",
         "You run entirely on the user's machine and must follow their instructions.",
+        "Maintain a subtle formal British tone; otherwise keep personality neutral so downstream filters can style replies.",
     ]
-    if persona_text:
-        sections.append(persona_text)
-    if style_rules:
-        sections.append(style_rules)
     sections.append(speech_rules)
     sections.append(tool_text)
     if memory_context:
