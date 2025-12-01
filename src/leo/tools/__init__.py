@@ -2,12 +2,12 @@
 
 from .base import BaseTool, ToolResult, ToolExecutionError
 from .context import ToolContext
-from .email import EmailSendTool
 from .registry import ToolRegistry
 from .reminders import RemindersCreateTool
 from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantSetLightsTool, HomeAssistantRunSceneTool
+from .gmail import GmailGetMessageTool, GmailListMessagesTool
 
 __all__ = [
     "BaseTool",
@@ -20,7 +20,8 @@ __all__ = [
     "TasksUpdateStatusTool",
     "RemindersCreateTool",
     "WebSearchTool",
-    "EmailSendTool",
+    "GmailListMessagesTool",
+    "GmailGetMessageTool",
     "HomeAssistantSetLightsTool",
     "HomeAssistantRunSceneTool",
 ]
