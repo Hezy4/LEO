@@ -5,11 +5,11 @@ from typing import Dict, Iterable, List
 
 from .base import BaseTool, ToolResult
 from .context import ToolContext
-from .email import EmailSendTool
 from .reminders import RemindersCreateTool
 from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantRunSceneTool, HomeAssistantSetLightsTool
+from .gmail import GmailGetMessageTool, GmailListMessagesTool
 
 
 class ToolRegistry:
@@ -49,7 +49,8 @@ class ToolRegistry:
             TasksUpdateStatusTool(context),
             RemindersCreateTool(context),
             WebSearchTool(context),
-            EmailSendTool(context),
+            GmailListMessagesTool(context),
+            GmailGetMessageTool(context),
             HomeAssistantSetLightsTool(context),
             HomeAssistantRunSceneTool(context),
         ):
