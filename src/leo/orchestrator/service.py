@@ -57,6 +57,19 @@ class ChatResponse(BaseModel):
     actions: List[Action] = Field(default_factory=list)
 
 
+class MemoryUpdateRequest(BaseModel):
+    user_id: str
+    user_message: str
+    assistant_reply: str
+    run_maintenance: bool = False
+
+
+class MemoryUpdateResponse(BaseModel):
+    added: int
+    stored: List[Dict[str, Any]] = Field(default_factory=list)
+    maintenance_run: bool = False
+
+
 class StatusResponse(BaseModel):
     llm: str
     memory: str
@@ -307,12 +320,13 @@ def _extract_memory_facts(user_message: str, assistant_reply: str) -> list[str]:
 def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_reply: str) -> None:
     facts = _extract_memory_facts(user_message, assistant_reply)
     if not facts:
-        return
+        return []
+    stored: list[dict[str, Any]] = []
     for fact in facts:
         owner_type = _classify_owner_type(fact)
         tags = _infer_tags(fact)
         try:
-            _ltm.add_memory(
+            mem_id = _ltm.add_memory(
                 user_id=user_id,
                 owner_type=owner_type,
                 content=fact,
@@ -320,8 +334,10 @@ def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_r
                 importance=0.6,
                 plasticity=0.3,
             )
+            stored.append({"id": mem_id, "content": fact, "owner_type": owner_type, "tags": tags})
         except Exception:
             continue
+    return stored
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -418,6 +434,29 @@ def status_endpoint() -> StatusResponse:
 
     tools_status = "ok" if _tools.list_tools() else "empty"
     return StatusResponse(llm=llm_status, memory=memory_status, tools=tools_status)
+
+
+@app.post("/memory/extract", response_model=MemoryUpdateResponse)
+def memory_extract_endpoint(request: MemoryUpdateRequest) -> MemoryUpdateResponse:
+    stored = []
+    try:
+        stored = _maybe_extract_and_store_memory(request.user_id, request.user_message, request.assistant_reply) or []
+    except Exception:
+        stored = []
+
+    maintenance_run = False
+    if request.run_maintenance:
+        try:
+            _ltm.decay_importance(user_id=request.user_id, owner_type="user")
+            _ltm.decay_importance(user_id=request.user_id, owner_type="assistant")
+            _ltm.prune_caps(user_id=request.user_id)
+            _ltm.merge_redundant(user_id=request.user_id, owner_type="user")
+            _ltm.merge_redundant(user_id=request.user_id, owner_type="assistant")
+            maintenance_run = True
+        except Exception:
+            maintenance_run = False
+
+    return MemoryUpdateResponse(added=len(stored), stored=stored, maintenance_run=maintenance_run)
 
 
 __all__ = ["app"]
