@@ -7,7 +7,7 @@ from .base import BaseTool, ToolResult
 from .context import ToolContext
 from .email import EmailSendTool
 from .reminders import RemindersCreateTool
-from .tasks import TasksCreateTool, TasksListTool
+from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantRunSceneTool, HomeAssistantSetLightsTool
 
@@ -46,6 +46,7 @@ class ToolRegistry:
         for tool in (
             TasksCreateTool(context),
             TasksListTool(context),
+            TasksUpdateStatusTool(context),
             RemindersCreateTool(context),
             WebSearchTool(context),
             EmailSendTool(context),

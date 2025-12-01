@@ -74,4 +74,41 @@ class TasksListTool(BaseTool):
         return ToolResult(success=True, data={"tasks": payload, "count": len(payload)})
 
 
-__all__ = ["TasksCreateTool", "TasksListTool"]
+class TasksUpdateStatusTool(BaseTool):
+    name = "tasks.update_status"
+    description = "Update the status of an existing task (use to mark tasks as completed)."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "task_id": {"type": "integer"},
+            "status": {
+                "type": "string",
+                "description": "Desired status such as 'completed', 'pending', or 'in_progress'. Defaults to 'completed'.",
+            },
+        },
+        "required": ["task_id"],
+    }
+
+    def run(self, arguments: Dict[str, Any]) -> ToolResult:
+        task_id = arguments["task_id"]
+        status = (arguments.get("status") or "completed").strip()
+        if not status:
+            status = "completed"
+
+        store: TaskStore = self.context.task_store  # type: ignore[assignment]
+        store.update_status(task_id, status)
+        task = store.get(task_id)
+        return ToolResult(
+            success=True,
+            data={
+                "task_id": task.id,
+                "title": task.title,
+                "status": task.status,
+                "due_at": task.due_at,
+            },
+            message=f"Task {task.id} marked as {task.status}.",
+        )
+
+
+__all__ = ["TasksCreateTool", "TasksListTool", "TasksUpdateStatusTool"]
