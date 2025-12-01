@@ -211,7 +211,6 @@ Codex should implement:
 
    * Facts about user:
 
-     * “Henry’s preferred ‘cozy’ scene.”
      * “Henry usually wakes at 8 AM on weekdays.”
    * Stored as text + embedding.
 
@@ -578,14 +577,17 @@ Configure the following environment variables before running the server if you�
 
 The tool registry exposes `homeassistant.set_lights` and `homeassistant.run_scene`. When tokens are missing, the adapters still succeed but return `mode: dry_run` to show what would have been sent.
 
-### Weather.gov integration
+### Weather.org integration
 
-The `weather.gov.forecast` tool fetches National Weather Service data for a given latitude/longitude.
+The new `weather.get` tool calls the Weather.org API for current conditions and an optional short forecast. Configure at least the base URL (and any credentials the service requires):
 
-- `WEATHER_GOV_USER_AGENT` – required contact-style User-Agent (e.g., `LEO/0.1 (your@email)`); weather.gov rejects requests without one
-- `WEATHER_GOV_TIMEOUT` – optional request timeout in seconds (default 15)
+- `WEATHER_ORG_BASE_URL` – e.g. `https://api.weather.org/v1`
+- `WEATHER_ORG_API_KEY` – secret/token if the API requires it
+- `WEATHER_ORG_API_KEY_HEADER` – header name to send the key in (skip if key goes in query params)
+- `WEATHER_ORG_API_KEY_PARAM` – query-string parameter name for the key (defaults to `api_key`)
+- `WEATHER_ORG_CURRENT_PATH` / `WEATHER_ORG_FORECAST_PATH` – override paths if the API uses non-default routes
 
-Tool arguments: `latitude`, `longitude` (required), `hourly` (bool to include hourly periods), and `hours` (1–48 limit for hourly data).
+Tool arguments accept either a free-form `location` string or `latitude` + `longitude`, plus optional `units`, `include_forecast`, and `forecast_hours`.
 
 ### Voice Agent (Porcupine + Whisper + Piper)
 
