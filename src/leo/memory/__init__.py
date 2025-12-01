@@ -6,6 +6,7 @@ from .reminders import ReminderStore, Reminder
 from .episodic import EpisodicMemoryStore, EpisodicMemory
 from .sessions import SessionStore, ConversationMessage
 from .persona import PersonaStore, PersonaTrait, PersonaSettings, MoodStore, MoodState
+from .long_term import LongTermMemoryStore, MemoryEntry
 
 __all__ = [
     "PreferenceStore",
@@ -23,4 +24,6 @@ __all__ = [
     "PersonaSettings",
     "MoodStore",
     "MoodState",
+    "LongTermMemoryStore",
+    "MemoryEntry",
 ]

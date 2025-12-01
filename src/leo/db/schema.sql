@@ -79,6 +79,33 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_session_created
     ON conversation_messages(session_id, created_at);
 
+CREATE TABLE IF NOT EXISTS long_term_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_type TEXT NOT NULL CHECK(owner_type IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    embedding JSON,
+    tags JSON NOT NULL,
+    importance REAL NOT NULL DEFAULT 0.5,
+    plasticity REAL NOT NULL DEFAULT 0.5,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    metadata JSON
+);
+
+CREATE INDEX IF NOT EXISTS idx_ltm_user_owner_importance
+    ON long_term_memories(user_id, owner_type, importance DESC, last_used_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    owner_type TEXT NOT NULL CHECK(owner_type IN ('user', 'assistant')),
+    memory_id INTEGER,
+    event_type TEXT NOT NULL,
+    payload JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS persona_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
