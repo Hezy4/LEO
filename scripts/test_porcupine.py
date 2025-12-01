@@ -3,6 +3,7 @@
 Run this before wiring Porcupine into the full voice agent to make sure the
 keyword file, access key, and microphone input all work as expected.
 """
+
 from __future__ import annotations
 
 import argparse
