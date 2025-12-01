@@ -1,10 +1,3 @@
-Got it, you want a spec for LEO that you can hand to an AI coder and say “build this” instead of micromanaging everything yourself. Reasonable. Let’s define this properly so Codex doesn’t invent garbage.
-
-Below is a **clean, implementation-focused description** of the LEO project.
-Use this as the reference doc for generating code.
-
----
-
 # Project: LEO – Local Executive Operator
 
 ## 0. Purpose
