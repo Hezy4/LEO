@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import queue
+import re
 import sys
 import time
 from pathlib import Path
@@ -263,6 +264,14 @@ def transcribe_audio(model: WhisperModel, audio: np.ndarray, sample_rate: int, l
     return " ".join(text_parts).strip()
 
 
+def is_meaningful_text(text: str) -> bool:
+    """Return True if the transcription contains alphanumeric content (not just punctuation/whitespace)."""
+
+    if not text:
+        return False
+    return bool(re.search(r"[A-Za-z0-9]", text))
+
+
 def speak_text(voice: PiperVoice, text: str) -> None:
     chunks = list(voice.synthesize(text, syn_config=DEFAULT_PIPER_SYN_CONFIG))
     if not chunks:
@@ -317,7 +326,7 @@ def main() -> None:
                 print("No audio captured.")
             return False
         text = transcribe_audio(whisper, audio, mic_sample_rate, args.language)
-        if not text:
+        if not text or not is_meaningful_text(text):
             if not args.quiet:
                 print("No speech detected.")
             return False

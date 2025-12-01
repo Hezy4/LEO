@@ -9,10 +9,26 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from leo.clients import OllamaClient, OllamaError
-from leo.memory import PreferenceStore, TaskStore, ReminderStore, EpisodicMemoryStore, SessionStore
+from leo.memory import (
+    PreferenceStore,
+    TaskStore,
+    ReminderStore,
+    EpisodicMemoryStore,
+    SessionStore,
+    PersonaStore,
+    MoodStore,
+)
 from leo.tools import ToolRegistry
 
 from .prompts import build_system_prompt, build_memory_context
+from .personality import (
+    PERSONALITY_FILTER_ENABLED,
+    classify_interaction_effect,
+    select_top_traits,
+    blend_personality_vector,
+    combine_with_mood,
+    build_personality_filter_prompt,
+)
 
 SPEECH_FRIENDLY_REMINDER = (
     "Provide the final response in plain conversational sentences suitable for text-to-speech. "
@@ -48,6 +64,8 @@ class StatusResponse(BaseModel):
 app = FastAPI(title="LEO Orchestrator", version="0.1.0")
 _ollama = OllamaClient()
 _preferences = PreferenceStore()
+_persona_store = PersonaStore()
+_moods = MoodStore(persona_store=_persona_store)
 _tools = ToolRegistry.default()
 _tasks = TaskStore()
 _reminders = ReminderStore()
@@ -169,14 +187,66 @@ def _gather_context(user_id: str) -> str:
     return build_memory_context(tasks, reminders, episodes)
 
 
+def _is_structured_json(text: str) -> bool:
+    candidate = text.strip()
+    if not candidate.startswith(("{", "[")):
+        return False
+    try:
+        json.loads(candidate)
+        return True
+    except json.JSONDecodeError:
+        return False
+
+
+def _apply_personality_filter(
+    user_message: str,
+    neutral_reply: str,
+    traits,
+    mood_state,
+) -> str:
+    if not PERSONALITY_FILTER_ENABLED:
+        return neutral_reply
+    if not traits or mood_state is None:
+        return neutral_reply
+    if _is_structured_json(neutral_reply):
+        return neutral_reply
+
+    base_vector = blend_personality_vector(traits)
+    combined_vector = combine_with_mood(base_vector, mood_state.values)
+    prompt_messages = build_personality_filter_prompt(
+        user_message=user_message,
+        neutral_response=neutral_reply,
+        combined_vector=combined_vector,
+        active_traits=traits,
+        mood=mood_state,
+    )
+    try:
+        result = _ollama.chat(prompt_messages)
+        content = result["message"]["content"].strip()
+        return content or neutral_reply
+    except Exception:
+        return neutral_reply
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest) -> ChatResponse:
+    session_id = request.session_id or request.user_id
     persona = _preferences.get_persona(request.user_id)
+    persona_settings = _persona_store.get_settings(request.user_id)
+    all_traits = _persona_store.list_traits(request.user_id) if persona_settings else []
+    active_traits = select_top_traits(all_traits)
+
+    effect_name = classify_interaction_effect(request.message) if persona_settings else None
+    mood_state = (
+        _moods.apply_interaction_effect(request.user_id, effect_name, session_id=session_id)
+        if effect_name
+        else _moods.get_mood(request.user_id, session_id=session_id)
+    ) if persona_settings else None
+
     memory_context = _gather_context(request.user_id)
     system_prompt = build_system_prompt(persona, _tools.list_tools(), memory_context)
 
     try:
-        session_id = request.session_id or request.user_id
         history = _sessions.get_history(session_id) if session_id else []
         messages = [{"role": "system", "content": system_prompt}, *history]
         step = _chat_once_with_history(messages, request.message)
@@ -203,7 +273,12 @@ def chat_endpoint(request: ChatRequest) -> ChatResponse:
     else:
         reply = llm_message
 
-    session_id = request.session_id or request.user_id
+    if active_traits and any(t.id for t in active_traits):
+        _persona_store.record_trait_usage([t.id for t in active_traits if t.id is not None])
+
+    if reply and persona_settings and mood_state:
+        reply = _apply_personality_filter(request.message, reply, active_traits, mood_state)
+
     if session_id:
         _sessions.append(session_id, request.user_id, "user", request.message)
         _sessions.append(session_id, request.user_id, "assistant", reply)
