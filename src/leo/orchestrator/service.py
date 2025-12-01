@@ -14,6 +14,11 @@ from leo.tools import ToolRegistry
 
 from .prompts import build_system_prompt, build_memory_context
 
+SPEECH_FRIENDLY_REMINDER = (
+    "Provide the final response in plain conversational sentences suitable for text-to-speech. "
+    "Do not use Markdown, decorative punctuation, bullet characters, or code fences—describe any lists "
+    "with transitions like 'First', 'Next', and 'Finally'."
+)
 
 class ChatRequest(BaseModel):
     user_id: str
@@ -139,7 +144,10 @@ def _finalize_with_tool(messages: List[Dict[str, str]], action: Action) -> str:
     messages.append(
         {
             "role": "user",
-            "content": "Provide the final response to the user that incorporates this tool result.",
+            "content": (
+                f"Provide the final response to the user that incorporates this tool result. "
+                f"{SPEECH_FRIENDLY_REMINDER}"
+            ),
         }
     )
     llm_response = _ollama.chat(messages)

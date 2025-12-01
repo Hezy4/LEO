@@ -94,6 +94,18 @@ def build_memory_context(
     return "\n".join(sections)
 
 
+def build_speech_rules() -> str:
+    return (
+        "Speech-friendly formatting requirements:\n"
+        "- Always reply using plain sentences that sound natural when read aloud.\n"
+        "- Never use Markdown or decorative punctuation such as asterisks, underscores, headings, "
+        "block quotes, or code fences.\n"
+        "- When listing steps, write them in prose with transitions like 'First', 'Next', and "
+        "'Finally' instead of bullet characters.\n"
+        "- Avoid ASCII art, emoji, or repeated punctuation that a TTS engine might read literally."
+    )
+
+
 def build_system_prompt(
     persona: Dict[str, object],
     tool_specs: List[Dict[str, object]],
@@ -102,12 +114,21 @@ def build_system_prompt(
     persona_text = format_persona(persona)
     tool_text = describe_tools(tool_specs)
     style_rules = build_style_rules(persona)
-    context_block = f"\n\nContext:\n{memory_context}" if memory_context else ""
-    return (
-        "You are LEO, a local privacy-preserving executive assistant.\n"
-        "You run entirely on the user's machine and must follow their instructions.\n"
-        f"{persona_text}\n\n{style_rules}\n\n{tool_text}{context_block}"
-    )
+    speech_rules = build_speech_rules()
+
+    sections: List[str] = [
+        "You are LEO, a local privacy-preserving executive assistant.",
+        "You run entirely on the user's machine and must follow their instructions.",
+    ]
+    if persona_text:
+        sections.append(persona_text)
+    if style_rules:
+        sections.append(style_rules)
+    sections.append(speech_rules)
+    sections.append(tool_text)
+    if memory_context:
+        sections.append(f"Context:\n{memory_context}")
+    return "\n\n".join(sections)
 
 
 __all__ = ["build_system_prompt", "build_memory_context", "build_style_rules"]
