@@ -10,6 +10,7 @@ from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantRunSceneTool, HomeAssistantSetLightsTool
 from .gmail import GmailGetMessageTool, GmailListMessagesTool
+from .weather_gov import WeatherGovForecastTool
 
 
 class ToolRegistry:
@@ -53,6 +54,7 @@ class ToolRegistry:
             GmailGetMessageTool(context),
             HomeAssistantSetLightsTool(context),
             HomeAssistantRunSceneTool(context),
+            WeatherGovForecastTool(context),
         ):
             registry.register(tool)
         return registry
