@@ -5,7 +5,7 @@ from .context import ToolContext
 from .email import EmailSendTool
 from .registry import ToolRegistry
 from .reminders import RemindersCreateTool
-from .tasks import TasksCreateTool, TasksListTool
+from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantSetLightsTool, HomeAssistantRunSceneTool
 
@@ -17,6 +17,7 @@ __all__ = [
     "ToolRegistry",
     "TasksCreateTool",
     "TasksListTool",
+    "TasksUpdateStatusTool",
     "RemindersCreateTool",
     "WebSearchTool",
     "EmailSendTool",
