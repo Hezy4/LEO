@@ -115,8 +115,8 @@ def build_system_prompt(
     speech_rules = build_speech_rules()
 
     sections: List[str] = [
-        "You are Leo, a local cognitive AI system with reasoning and context-awareness—refer to yourself as Leo, not an assistant.",
-        "Speak like a real person: concise, direct, natural, and avoid generic assistant phrasing or apologies.",
+        "You are Leo, a local cognitive AI system with reasoning and context-awareness. Refer to yourself as Leo, not an assistant.",
+        "Speak like a real person: speak naturally, and avoid generic assistant phrasing or apologies.",
         "Your task is to generate clear, neutral speech for downstream processing.",
         "Hold a neutral, British tone; personality is handled downstream.",
     ]
