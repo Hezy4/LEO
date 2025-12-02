@@ -64,6 +64,14 @@ class MemoryUpdateRequest(BaseModel):
     run_maintenance: bool = False
 
 
+class MemoryPromotionRequest(BaseModel):
+    user_id: str
+    session_id: Optional[str] = None
+    max_turns: int = 6
+    max_age_minutes: Optional[int] = None
+    run_maintenance: bool = False
+
+
 class MemoryUpdateResponse(BaseModel):
     added: int
     stored: List[Dict[str, Any]] = Field(default_factory=list)
@@ -317,7 +325,7 @@ def _extract_memory_facts(user_message: str, assistant_reply: str) -> list[str]:
     return []
 
 
-def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_reply: str) -> None:
+def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_reply: str) -> list[dict[str, Any]] | None:
     facts = _extract_memory_facts(user_message, assistant_reply)
     if not facts:
         return []
@@ -338,6 +346,35 @@ def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_r
         except Exception:
             continue
     return stored
+
+
+def _pair_recent_turns(history: List[Dict[str, str]]) -> list[tuple[str, str]]:
+    """Collapse a chat history into user/assistant pairs for promotion."""
+
+    pairs: list[tuple[str, str]] = []
+    pending_user: str | None = None
+    for message in history:
+        role = message.get("role")
+        content = (message.get("content") or "").strip()
+        if role == "user":
+            pending_user = content or None
+        elif role == "assistant" and pending_user:
+            if content:
+                pairs.append((pending_user, content))
+            pending_user = None
+    return pairs
+
+
+def _run_memory_maintenance(user_id: str) -> bool:
+    try:
+        _ltm.decay_importance(user_id=user_id, owner_type="user")
+        _ltm.decay_importance(user_id=user_id, owner_type="assistant")
+        _ltm.prune_caps(user_id=user_id)
+        _ltm.merge_redundant(user_id=user_id, owner_type="user")
+        _ltm.merge_redundant(user_id=user_id, owner_type="assistant")
+        return True
+    except Exception:
+        return False
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -444,18 +481,29 @@ def memory_extract_endpoint(request: MemoryUpdateRequest) -> MemoryUpdateRespons
     except Exception:
         stored = []
 
-    maintenance_run = False
-    if request.run_maintenance:
-        try:
-            _ltm.decay_importance(user_id=request.user_id, owner_type="user")
-            _ltm.decay_importance(user_id=request.user_id, owner_type="assistant")
-            _ltm.prune_caps(user_id=request.user_id)
-            _ltm.merge_redundant(user_id=request.user_id, owner_type="user")
-            _ltm.merge_redundant(user_id=request.user_id, owner_type="assistant")
-            maintenance_run = True
-        except Exception:
-            maintenance_run = False
+    maintenance_run = _run_memory_maintenance(request.user_id) if request.run_maintenance else False
 
+    return MemoryUpdateResponse(added=len(stored), stored=stored, maintenance_run=maintenance_run)
+
+
+@app.post("/memory/promote", response_model=MemoryUpdateResponse)
+def memory_promote_endpoint(request: MemoryPromotionRequest) -> MemoryUpdateResponse:
+    """Manually trigger promotion of recent session history into long-term memory."""
+
+    session_id = request.session_id or request.user_id
+    history = _sessions.get_history(session_id, max_age_minutes=request.max_age_minutes)
+    pairs = _pair_recent_turns(history)
+    if request.max_turns > 0:
+        pairs = pairs[-request.max_turns :]
+
+    stored: list[dict[str, Any]] = []
+    for user_msg, assistant_reply in pairs:
+        try:
+            stored.extend(_maybe_extract_and_store_memory(request.user_id, user_msg, assistant_reply) or [])
+        except Exception:
+            continue
+
+    maintenance_run = _run_memory_maintenance(request.user_id) if request.run_maintenance else False
     return MemoryUpdateResponse(added=len(stored), stored=stored, maintenance_run=maintenance_run)
 
 
