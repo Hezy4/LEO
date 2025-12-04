@@ -26,11 +26,11 @@ Local, privacy-first assistant that runs against a local LLM via Ollama, calls t
 1. Install deps: `pip install -e .`
 2. Start Ollama; set `OLLAMA_HOST` and `MODEL_NAME` (default `gpt-oss:20b`).
 3. Init the DB (defaults to `var/leo.db`): `python scripts/init_db.py`
-4. Seed persona: `python scripts/load_persona.py --user-id henry --display-name "Henry Boes"`
+4. Seed persona: `python scripts/load_persona.py --user-id USER --display-name "USER NAME"`
 5. Smoke-test the LLM: `python examples/ollama_ping.py`
 6. Run the API: `python scripts/run_server.py` (FastAPI on `http://localhost:8000`)
-7. Chat from the CLI: `python scripts/chat_cli.py --user-id henry --session-id cli`
-   - Or curl: `curl -X POST http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"user_id":"henry","message":"Make it comfy."}'`
+7. Chat from the CLI: `python scripts/chat_cli.py --user-id USER --session-id cli`
+   - Or curl: `curl -X POST http://localhost:8000/chat -H 'Content-Type: application/json' -d '{"user_id":"USER","message":"Make it comfy."}'`
 8. Exercise tools without the LLM: `python scripts/demo_tools.py` (writes outbox to `var/outbox/`)
 
 ## Configuration
