@@ -1,0 +1,17 @@
+httpx>=0.25
+fastapi>=0.111
+uvicorn>=0.30
+pydantic>=2.6
+ddgs>=1.0.0
+google-api-python-client>=2.136.0
+google-auth>=2.29.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+faster-whisper>=1.0
+piper-tts>=1.2
+openwakeword>=0.6
+pvporcupine>=3.0
+sounddevice>=0.4
+soundfile>=0.12
+numpy>=1.26
+scipy>=1.11
