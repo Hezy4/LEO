@@ -7,3 +7,5 @@ scripts/test_porcupine.py
 var/leo.db
 .DS_Store
 .DS_Store
+src/leo.egg-info/PKG-INFO
+*.pyc
