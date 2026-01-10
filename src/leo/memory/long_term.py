@@ -4,12 +4,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+import math
 from typing import Any, Iterable, List, Mapping, Sequence
 
 import numpy as np
 
 from leo.clients import EmbeddingClient
 from leo.db import Database
+from leo.memory.base import MemoryStore
 
 
 def _now() -> datetime:
@@ -43,7 +45,7 @@ class MemoryEntry:
     metadata: dict[str, Any] | None = None
 
 
-class LongTermMemoryStore:
+class LongTermMemoryStore(MemoryStore):
     """Encapsulates LTM persistence, retrieval, and pruning."""
 
     def __init__(
@@ -56,6 +58,11 @@ class LongTermMemoryStore:
         per_tag_caps: Mapping[str, int] | None = None,
         decay_per_day: float = 0.01,
         similarity_merge_threshold: float = 0.95,
+        similarity_weight: float = 0.6,
+        importance_weight: float = 0.25,
+        recency_weight: float = 0.15,
+        recency_half_life_days: float = 14.0,
+        usage_promotion_threshold: int = 3,
     ) -> None:
         self.db = db or Database()
         self.embed_client = embed_client or EmbeddingClient()
@@ -72,6 +79,11 @@ class LongTermMemoryStore:
         }
         self.decay_per_day = decay_per_day
         self.similarity_merge_threshold = similarity_merge_threshold
+        self.similarity_weight = similarity_weight
+        self.importance_weight = importance_weight
+        self.recency_weight = recency_weight
+        self.recency_half_life_days = recency_half_life_days
+        self.usage_promotion_threshold = usage_promotion_threshold
 
     def embed_text(self, text: str) -> list[float]:
         return self.embed_client.embed(text)
@@ -142,56 +154,100 @@ class LongTermMemoryStore:
             return []
 
         scored: list[tuple[MemoryEntry, float]] = []
+        now = _now()
         for entry in candidates:
             emb = np.array(entry.embedding, dtype=np.float32)
             denom = np.linalg.norm(q) * np.linalg.norm(emb)
             if denom == 0:
                 continue
             sim = float(np.dot(q, emb) / denom)
-            boost = 1.0 + entry.importance
-            scored.append((entry, sim * boost))
+            score = self._score_entry(sim, entry, now)
+            scored.append((entry, score))
 
         scored.sort(key=lambda pair: pair[1], reverse=True)
         results = [pair[0] for pair in scored[:limit]]
         if results:
-            self.update_last_used([m.id for m in results])
+            self.update_usage([m.id for m in results])
         return results
 
-    def update_last_used(self, memory_ids: Iterable[int]) -> None:
+    def update_usage(self, memory_ids: Iterable[int]) -> None:
+        """Mark memories as used; updates last_used and increments a lightweight use counter in metadata."""
+
         ids = list(memory_ids)
         if not ids:
             return
         placeholders = ",".join("?" for _ in ids)
+        rows = self.db.query(
+            f"SELECT id, metadata FROM long_term_memories WHERE id IN ({placeholders})",
+            tuple(ids),
+        )
         with self.db.connect() as conn:
-            conn.execute(
-                f"UPDATE long_term_memories SET last_used_at=CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
-                tuple(ids),
-            )
+            for row in rows:
+                meta = json.loads(row["metadata"]) if row["metadata"] else {}
+                use_count = int(meta.get("use_count", 0)) + 1
+                meta["use_count"] = use_count
+                conn.execute(
+                    """
+                    UPDATE long_term_memories
+                    SET last_used_at=CURRENT_TIMESTAMP, metadata=?
+                    WHERE id = ?
+                    """,
+                    (json.dumps(meta), row["id"]),
+                )
             conn.commit()
+
+    def update_last_used(self, memory_ids: Iterable[int]) -> None:
+        self.update_usage(memory_ids)
+
+    def run_maintenance(self, *, user_id: str) -> None:
+        self.decay_importance(user_id=user_id, owner_type="user")
+        self.decay_importance(user_id=user_id, owner_type="assistant")
+        self.prune_caps(user_id=user_id)
+        self.merge_redundant(user_id=user_id, owner_type="user")
+        self.merge_redundant(user_id=user_id, owner_type="assistant")
 
     def decay_importance(self, *, user_id: str, owner_type: str) -> None:
         rows = self.db.query(
             """
-            SELECT id, last_used_at, importance FROM long_term_memories
+            SELECT id, last_used_at, importance, metadata FROM long_term_memories
             WHERE user_id = ? AND owner_type = ?
             """,
             (user_id, owner_type),
         )
         now = _now()
-        updates: list[tuple[float, int]] = []
+        updates: list[tuple[float, str | None, int]] = []
         for row in rows:
             last_used = _parse_ts(row["last_used_at"])
             days = max(0.0, (now - last_used).total_seconds() / 86400.0)
-            importance = float(row["importance"])
-            decayed = max(0.0, importance - self.decay_per_day * days)
-            if decayed != importance:
-                updates.append((decayed, row["id"]))
+            level = self._importance_level(float(row["importance"]))
+
+            meta: dict[str, Any] = {}
+            try:
+                meta = json.loads(row["metadata"]) if row["metadata"] else {}
+            except Exception:
+                meta = {}
+            use_count = int(meta.get("use_count", 0))
+
+            if use_count >= self.usage_promotion_threshold and level < 5:
+                level = min(5.0, level + 1.0)
+                meta["use_count"] = 0
+
+            if level < 5 and days >= 7.0:
+                drop = int(days // 7)
+                level = max(1.0, level - drop)
+
+            if level != float(row["importance"]) or int(meta.get("use_count", 0)) != use_count:
+                updates.append((level, json.dumps(meta) if meta else None, row["id"]))
         if updates:
             with self.db.connect() as conn:
-                for importance, mem_id in updates:
+                for importance, meta_json, mem_id in updates:
                     conn.execute(
-                        "UPDATE long_term_memories SET importance = ?, last_used_at=CURRENT_TIMESTAMP WHERE id = ?",
-                        (importance, mem_id),
+                        """
+                        UPDATE long_term_memories
+                        SET importance = ?, metadata = COALESCE(?, metadata), last_used_at=CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (importance, meta_json, mem_id),
                     )
                 conn.commit()
 
@@ -300,6 +356,32 @@ class LongTermMemoryStore:
             last_used_at=row["last_used_at"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else None,
         )
+
+    def _importance_level(self, raw: float) -> float:
+        """Normalize stored importance to a 1–5 scale; supports legacy 0–1 values."""
+
+        if raw <= 1.0:
+            return max(1.0, min(5.0, raw * 5.0))
+        return max(1.0, min(5.0, raw))
+
+    def _recency_score(self, last_used: str, now: datetime) -> float:
+        """Compute a recency weight in [0, 1] using exponential decay by age."""
+
+        ts = _parse_ts(last_used)
+        age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
+        if age_days == 0.0:
+            return 1.0
+        return math.exp(-age_days / max(1e-6, self.recency_half_life_days))
+
+    def _score_entry(self, similarity: float, entry: MemoryEntry, now: datetime) -> float:
+        """Blend similarity, importance, and recency into a final retrieval score."""
+
+        level = self._importance_level(entry.importance)
+        recency = self._recency_score(entry.last_used_at, now)
+        sim_component = similarity * self.similarity_weight
+        imp_component = (level / 5.0) * self.importance_weight
+        recency_component = recency * self.recency_weight
+        return sim_component + imp_component + recency_component
 
 
 __all__ = ["LongTermMemoryStore", "MemoryEntry"]
