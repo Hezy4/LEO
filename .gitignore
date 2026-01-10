@@ -9,3 +9,4 @@ var/leo.db
 .DS_Store
 src/leo.egg-info/PKG-INFO
 *.pyc
+.DS_Store

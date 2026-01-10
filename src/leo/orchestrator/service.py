@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 
@@ -34,9 +35,15 @@ from .personality import (
 SPEECH_FRIENDLY_REMINDER = (
     "Provide the final response in plain conversational sentences suitable for text-to-speech. "
     "You are Leo (do not call yourself an assistant), keep it natural and human. "
-    "Do NOT use Markdown, decorative punctuation, bullet characters, or code fences—describe any lists "
+    "Do NOT use Markdown, do NOT use decorative punctuation, do NOT use bullet characters, do NOT use atrisks, or code fences—describe any lists "
     "with transitions like 'First', 'Next', and 'Finally'."
 )
+
+# Buffered memory capture settings
+BUFFER_MESSAGE_THRESHOLD = 10
+BUFFER_IDLE_SECONDS = 10
+
+logger = logging.getLogger(__name__)
 
 class ChatRequest(BaseModel):
     user_id: str
@@ -95,7 +102,10 @@ _tools = ToolRegistry.default()
 _tasks = TaskStore()
 _reminders = ReminderStore()
 _episodes = EpisodicMemoryStore()
-_sessions = SessionStore(max_history=12, max_age_minutes=20)
+_sessions = SessionStore(max_history=30, max_age_minutes=360)
+
+# In-memory buffers used to batch conversation into summaries
+_session_buffers: Dict[str, Dict[str, Any]] = {}
 
 
 def _strip_json_fences(content: str) -> str:
@@ -348,6 +358,98 @@ def _maybe_extract_and_store_memory(user_id: str, user_message: str, assistant_r
     return stored
 
 
+def _session_buffer(session_id: str) -> Dict[str, Any]:
+    buf = _session_buffers.get(session_id)
+    if buf is None:
+        buf = {"messages": [], "last_at": datetime.now(timezone.utc)}
+        _session_buffers[session_id] = buf
+    return buf
+
+
+def _append_to_buffer(session_id: str, role: str, content: str) -> None:
+    buf = _session_buffer(session_id)
+    buf["messages"].append({"role": role, "content": content})
+    buf["last_at"] = datetime.now(timezone.utc)
+
+
+def _summarize_buffer(messages: list[Dict[str, str]]) -> Optional[str]:
+    if not messages:
+        return None
+    convo = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '').strip()}" for m in messages if m.get("content"))
+    logger.debug("Summarizing buffer with %d messages", len(messages))
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "You summarize a conversation into a concise long-term memory. "
+                "Capture key facts, decisions, commitments, and preferences. "
+                "Return 2-5 sentences of plain text (no bullets, no Markdown)."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Conversation:\n{convo}\n\nProvide the concise memory summary now.",
+        },
+    ]
+    try:
+        result = _ollama.chat(prompt)
+        return (result.get("message", {}).get("content") or "").strip()
+    except Exception as exc:
+        logger.warning("Failed to summarize buffer: %s", exc)
+        return None
+
+
+def _flush_buffer_to_memory(session_id: str, user_id: str, *, reason: str) -> bool:
+    buf = _session_buffers.get(session_id)
+    if not buf or not buf.get("messages"):
+        return False
+    msg_count = len(buf["messages"])
+    summary = _summarize_buffer(buf["messages"])
+    if not summary:
+        return False
+    try:
+        _ltm.add_memory(
+            user_id=user_id,
+            owner_type="user",
+            content=summary,
+            tags=["history", "episodic"],
+            importance=0.6,
+            plasticity=0.3,
+            metadata={"source": "buffered_summary", "reason": reason, "count": msg_count},
+        )
+        _session_buffers[session_id] = {"messages": [], "last_at": datetime.now(timezone.utc)}
+        try:
+            _ltm.run_maintenance(user_id=user_id)
+        except Exception:
+            pass
+        logger.info(
+            "Buffered summary stored (session=%s, reason=%s, messages=%d, summary_len=%d)",
+            session_id,
+            reason,
+            msg_count,
+            len(summary),
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Failed to store buffered summary (session=%s): %s", session_id, exc)
+        return False
+
+
+def _maybe_flush_on_idle(session_id: str, user_id: str, now: datetime) -> None:
+    buf = _session_buffers.get(session_id)
+    if not buf or not buf.get("messages"):
+        return
+    idle_seconds = (now - buf.get("last_at", now)).total_seconds()
+    if idle_seconds >= BUFFER_IDLE_SECONDS:
+        logger.debug(
+            "Idle flush triggered (session=%s, idle=%.2fs, threshold=%ds)",
+            session_id,
+            idle_seconds,
+            BUFFER_IDLE_SECONDS,
+        )
+        _flush_buffer_to_memory(session_id, user_id, reason="idle_timeout")
+
+
 def _pair_recent_turns(history: List[Dict[str, str]]) -> list[tuple[str, str]]:
     """Collapse a chat history into user/assistant pairs for promotion."""
 
@@ -380,6 +482,15 @@ def _run_memory_maintenance(user_id: str) -> bool:
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest) -> ChatResponse:
     session_id = request.session_id or request.user_id
+    now = datetime.now(timezone.utc)
+    logger.debug(
+        "Chat request received (user=%s, session=%s, message_len=%d)",
+        request.user_id,
+        session_id,
+        len(request.message or ""),
+    )
+    _maybe_flush_on_idle(session_id, request.user_id, now)
+
     persona = _preferences.get_persona(request.user_id)
     persona_settings = _persona_store.get_settings(request.user_id)
     all_traits = _persona_store.list_traits(request.user_id) if persona_settings else []
@@ -436,11 +547,12 @@ def chat_endpoint(request: ChatRequest) -> ChatResponse:
     if reply and persona_settings and mood_state:
         reply = _apply_personality_filter(request.message, reply, active_traits, mood_state)
 
-    # Memory extraction: capture durable facts/preferences from the turn
-    try:
-        _maybe_extract_and_store_memory(request.user_id, request.message, reply)
-    except Exception:
-        pass
+    # Buffer conversation turns; flush to LTM on thresholds
+    _append_to_buffer(session_id, "user", request.message)
+    _append_to_buffer(session_id, "assistant", reply)
+    buf = _session_buffer(session_id)
+    if len(buf.get("messages", [])) >= BUFFER_MESSAGE_THRESHOLD:
+        _flush_buffer_to_memory(session_id, request.user_id, reason="message_count_threshold")
 
     # Merge redundant memories occasionally
     try:

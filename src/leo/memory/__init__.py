@@ -1,5 +1,6 @@
 """Memory layer stores."""
 
+from .base import MemoryStore
 from .preferences import PreferenceStore, PreferenceEntry
 from .tasks import TaskStore, Task
 from .reminders import ReminderStore, Reminder
@@ -26,4 +27,5 @@ __all__ = [
     "MoodState",
     "LongTermMemoryStore",
     "MemoryEntry",
+    "MemoryStore",
 ]

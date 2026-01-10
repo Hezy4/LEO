@@ -11,7 +11,7 @@ class OllamaConfig:
     """Settings for talking to the local Ollama server."""
 
     host: str = "http://localhost:11434"
-    model: str = "gpt-oss:20b"
+    model: str = "gpt-oss:120b-cloud"
     timeout: float = 60.0
 
     @classmethod
