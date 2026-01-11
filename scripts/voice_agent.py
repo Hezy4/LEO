@@ -361,7 +361,7 @@ def main() -> None:
             keyword_label = keyword_path.name if keyword_path else "wake word"
             print(
                 "Voice agent running with Porcupine wake word detection. "
-                f"Say '{keyword_label}' to start (Ctrl+C to exit)."
+                f"Say 'Hey Leo' to start (Ctrl+C to exit)."
             )
         try:
             while True:
