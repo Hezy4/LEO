@@ -1,9 +1,6 @@
 Chatting Terminal:
 
-python3 scripts/voice_agent.py \
-  --whisper-model base \
-  --piper-model models/piper/en_GB-northern_english_male-medium.onnx \
-  --piper-config models/piper/en_GB-northern_english_male-medium.onnx.json
+python3 scripts/voice_agent.py --whisper-model base --piper-model models/piper/en_GB-northern_english_male-medium.onnx --piper-config models/piper/en_GB-northern_english_male-medium.onnx.json
 
 Background terminal:
 
