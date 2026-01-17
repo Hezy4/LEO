@@ -6,6 +6,7 @@ from .registry import ToolRegistry
 from .reminders import RemindersCreateTool
 from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
+from .browser_use import BrowserUseTool
 from .homeassistant import HomeAssistantSetLightsTool, HomeAssistantRunSceneTool
 from .gmail import GmailGetMessageTool, GmailListMessagesTool
 from .weather_gov import WeatherGovForecastTool
@@ -21,6 +22,7 @@ __all__ = [
     "TasksUpdateStatusTool",
     "RemindersCreateTool",
     "WebSearchTool",
+    "BrowserUseTool",
     "GmailListMessagesTool",
     "GmailGetMessageTool",
     "HomeAssistantSetLightsTool",
