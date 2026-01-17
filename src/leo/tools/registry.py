@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List
 from .base import BaseTool, ToolResult
 from .context import ToolContext
 from .reminders import RemindersCreateTool
+from .browser_use import BrowserUseTool
 from .tasks import TasksCreateTool, TasksListTool, TasksUpdateStatusTool
 from .web import WebSearchTool
 from .homeassistant import HomeAssistantRunSceneTool, HomeAssistantSetLightsTool
@@ -50,6 +51,7 @@ class ToolRegistry:
             TasksUpdateStatusTool(context),
             RemindersCreateTool(context),
             WebSearchTool(context),
+            BrowserUseTool(context),
             GmailListMessagesTool(context),
             GmailGetMessageTool(context),
             HomeAssistantSetLightsTool(context),
