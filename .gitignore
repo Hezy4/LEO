@@ -10,3 +10,11 @@ var/leo.db
 src/leo.egg-info/PKG-INFO
 *.pyc
 .DS_Store
+
+# Never commit runtime state or build junk
+var/
+*.db
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
